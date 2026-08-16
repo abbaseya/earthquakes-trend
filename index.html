@@ -1,0 +1,1437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Is the Earth shaking more? — Global earthquake trend tracker</title>
+<meta name="description" content="Live global earthquake counts from the USGS catalog, grouped by magnitude class, so you can see for yourself whether earthquake activity is actually rising or just getting more coverage.">
+<meta name="color-scheme" content="dark">
+
+<meta property="og:title" content="Is the Earth shaking more?">
+<meta property="og:description" content="Live global earthquake counts from the USGS catalog. See for yourself whether activity is rising or it's just the news cycle.">
+<meta property="og:type" content="website">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   TOKENS
+   Palette is validated, not eyeballed. The magnitude ramp is a single-hue
+   ordinal ramp (blue), checked with the dataviz validator against this exact
+   dark surface: lightness monotone, adjacent dL >= 0.06, light end 2.87:1,
+   hue spread 3deg — all pass. Brighter = bigger quake, so the rare large
+   events pop off a recessive field of small ones.
+   PAGER alert colours are the fixed status palette. Green/red are close under
+   deuteranopia, so every alert chip carries a text label and a glyph — colour
+   never carries that meaning alone.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --plane:        #08090b;
+  --surface:      #0e1014;
+  --surface-2:    #13161c;
+  --surface-3:    #191d25;
+
+  --ink:          #f2f4f7;
+  --ink-2:        #a8b0bd;
+  --ink-3:        #6e7684;
+  --grid:         #1b1f26;
+  --axis:         #2a2f38;
+  --hairline:     rgba(242,244,247,0.09);
+
+  /* ordinal magnitude ramp — VALIDATED (dark, surface #0e1014) */
+  --mag-light:    #1c5cab;
+  --mag-moderate: #3987e5;
+  --mag-strong:   #86b6ef;
+  --mag-major:    #cde2fb;
+
+  /* fixed status palette — always paired with a text label */
+  --st-good:      #0ca30c;
+  --st-warning:   #fab219;
+  --st-serious:   #ec835a;
+  --st-critical:  #d03b3b;
+
+  --accent:       #cde2fb;
+
+  --font-display: "Bricolage Grotesque", "Helvetica Neue", sans-serif;
+  --font-body:    "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --font-mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --r: 3px;
+  --maxw: 1180px;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* fine grain + hairline grid, the "station readout" ground */
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 68px 68px;
+  opacity: .34;
+  mask-image: radial-gradient(ellipse 120% 75% at 50% 0%, #000 25%, transparent 78%);
+}
+body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+  opacity: .16; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.55'/%3E%3C/svg%3E");
+}
+.wrap { position: relative; z-index: 2; max-width: var(--maxw); margin: 0 auto; padding: 0 24px 96px; }
+
+/* ── HEADER ────────────────────────────────────────────────────────────── */
+header.masthead { position: relative; padding: 56px 0 30px; }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .19em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 20px;
+  display: flex; align-items: center; gap: 11px; flex-wrap: wrap;
+}
+.eyebrow .pulse {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--st-good);
+  box-shadow: 0 0 0 0 rgba(12,163,12,.6); animation: pulse 2.6s infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(12,163,12,.55); }
+  70%  { box-shadow: 0 0 0 8px rgba(12,163,12,0); }
+  100% { box-shadow: 0 0 0 0 rgba(12,163,12,0); }
+}
+h1 {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(2.5rem, 7.2vw, 5.2rem);
+  line-height: .95;
+  letter-spacing: -.035em;
+  margin: 0 0 22px;
+  max-width: 15ch;
+}
+h1 em { font-style: normal; color: var(--ink-3); }
+.standfirst {
+  font-size: clamp(1rem, 1.9vw, 1.16rem); color: var(--ink-2);
+  max-width: 62ch; margin: 0; line-height: 1.62;
+}
+.standfirst strong { color: var(--ink); font-weight: 600; }
+
+/* the header trace IS the data — real monthly counts, drawn faintly */
+#headerTrace {
+  position: absolute; right: 0; top: 0; width: 100%; height: 100%;
+  pointer-events: none; opacity: .26;
+  mask-image: linear-gradient(90deg, transparent 0%, transparent 46%, #000 66%, #000 100%);
+}
+#headerTrace path { fill: none; stroke: var(--mag-moderate); stroke-width: 1.25; vector-effect: non-scaling-stroke; }
+
+/* ── VERDICT ───────────────────────────────────────────────────────────── */
+.verdict {
+  position: relative; margin: 40px 0 0;
+  border: 1px solid var(--hairline); border-radius: var(--r);
+  background: linear-gradient(160deg, var(--surface-2), var(--surface));
+  padding: 34px 34px 30px; overflow: hidden;
+}
+.verdict::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--verdict-color, var(--ink-3));
+}
+.verdict-label {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .18em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 14px;
+}
+.verdict-line {
+  font-family: var(--font-display); font-weight: 800;
+  font-size: clamp(1.75rem, 4.4vw, 3rem); line-height: 1.02;
+  letter-spacing: -.03em; margin: 0 0 18px; color: var(--verdict-color, var(--ink));
+  max-width: 22ch;
+}
+.verdict-body { color: var(--ink-2); max-width: 68ch; margin: 0; font-size: 15px; }
+.verdict-body b { color: var(--ink); font-weight: 600; }
+
+.stat-row {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  gap: 1px; margin-top: 28px; background: var(--hairline);
+  border: 1px solid var(--hairline); border-radius: var(--r); overflow: hidden;
+}
+.stat { background: var(--surface); padding: 17px 18px; }
+.stat dt {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--ink-3); margin: 0 0 7px;
+}
+.stat dd {
+  margin: 0; font-size: 1.72rem; font-weight: 600; line-height: 1;
+  letter-spacing: -.02em; /* proportional figures on standalone values */
+}
+.stat dd small { display: block; font-size: 11px; font-weight: 400; color: var(--ink-3); margin-top: 7px; letter-spacing: 0; }
+
+/* ── FILTER BAR — one row above everything it scopes ───────────────────── */
+.filters {
+  position: sticky; top: 0; z-index: 30; margin: 44px 0 0;
+  padding: 15px 0; background: rgba(8,9,11,.93);
+  backdrop-filter: blur(11px); -webkit-backdrop-filter: blur(11px);
+  border-bottom: 1px solid var(--hairline);
+  display: flex; flex-wrap: wrap; gap: 11px 22px; align-items: flex-end;
+}
+.fgroup { display: flex; flex-direction: column; gap: 7px; }
+.fgroup > label {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 32px; padding: 0 11px;
+  border: 1px solid var(--hairline); border-radius: var(--r);
+  background: var(--surface-2); color: var(--ink-2);
+  font-family: var(--font-body); font-size: 12.5px; font-weight: 500;
+  cursor: pointer; transition: background .16s, color .16s, border-color .16s;
+  white-space: nowrap;
+}
+.chip:hover { background: var(--surface-3); color: var(--ink); }
+.chip .sw { width: 9px; height: 9px; border-radius: 2px; background: currentColor; flex: none; }
+.chip[aria-pressed="true"] { color: var(--ink); border-color: rgba(242,244,247,.26); background: var(--surface-3); }
+.chip[aria-pressed="false"] .sw { opacity: .26; }
+.chip .cost { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+select {
+  min-height: 32px; padding: 0 30px 0 11px;
+  background: var(--surface-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236e7684' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color: var(--ink); border: 1px solid var(--hairline); border-radius: var(--r);
+  font-family: var(--font-body); font-size: 12.5px; cursor: pointer; appearance: none;
+}
+select:focus-visible, .chip:focus-visible, button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--mag-strong); outline-offset: 2px;
+}
+input[type="search"] {
+  min-height: 32px; padding: 0 11px; background: var(--surface-2); color: var(--ink);
+  border: 1px solid var(--hairline); border-radius: var(--r);
+  font-family: var(--font-body); font-size: 12.5px; width: 150px;
+}
+.fspacer { flex: 1 1 auto; }
+.fmeta { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3); text-align: right; line-height: 1.6; }
+
+/* progress */
+.progress { height: 2px; background: var(--surface-3); border-radius: 2px; overflow: hidden; margin-top: 5px; width: 158px; margin-left: auto; }
+.progress i { display: block; height: 100%; background: var(--mag-moderate); width: 0; transition: width .3s ease; }
+.progress.done { opacity: 0; transition: opacity .5s .4s; }
+
+/* ── SECTIONS & CARDS ──────────────────────────────────────────────────── */
+section { margin-top: 62px; }
+.sec-head { margin-bottom: 20px; }
+.sec-num {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: .17em;
+  color: var(--ink-3); text-transform: uppercase; display: block; margin-bottom: 9px;
+}
+h2 {
+  font-family: var(--font-display); font-weight: 600;
+  font-size: clamp(1.35rem, 2.7vw, 1.95rem); letter-spacing: -.022em;
+  margin: 0 0 9px; line-height: 1.12;
+}
+.sec-head p { margin: 0; color: var(--ink-2); max-width: 74ch; font-size: 14.5px; }
+.card {
+  border: 1px solid var(--hairline); border-radius: var(--r);
+  background: var(--surface); padding: 22px;
+}
+.legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+.legend span {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--ink-2);
+}
+.legend i { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+.legend i.line { height: 0; width: 15px; border-top: 2px solid; border-radius: 0; }
+.legend i.dash { height: 0; width: 15px; border-top: 2px dashed; border-radius: 0; }
+
+/* ── CHARTS ────────────────────────────────────────────────────────────── */
+.chart { position: relative; width: 100%; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.gridline { stroke: var(--grid); stroke-width: 1; shape-rendering: crispEdges; }
+.axisline { stroke: var(--axis); stroke-width: 1; shape-rendering: crispEdges; }
+.tick { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-3); font-variant-numeric: tabular-nums; }
+.axis-title { font-family: var(--font-mono); font-size: 10px; fill: var(--ink-3); letter-spacing: .1em; text-transform: uppercase; }
+/* halo so a direct label stays readable wherever it lands over a mark */
+.dlabel {
+  font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round;
+}
+.avgline { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }
+.hitrect { fill: transparent; cursor: crosshair; }
+.bar { transition: opacity .13s; }
+.bar-group:hover .bar { opacity: .55; }
+.bar-group:hover .bar.on { opacity: 1; }
+.crosshair { stroke: var(--ink-3); stroke-width: 1; pointer-events: none; }
+
+.tooltip {
+  position: absolute; z-index: 40; pointer-events: none; opacity: 0;
+  transform: translate(-50%, -100%); transition: opacity .1s;
+  background: var(--surface-3); border: 1px solid rgba(242,244,247,.17);
+  border-radius: var(--r); padding: 10px 12px; min-width: 152px;
+  box-shadow: 0 12px 34px rgba(0,0,0,.62);
+}
+.tooltip.on { opacity: 1; }
+.tt-title { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 8px; }
+.tt-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin-top: 4px; white-space: nowrap; }
+.tt-row i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.tt-row b { margin-left: auto; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 500; }
+.tt-total { border-top: 1px solid var(--hairline); margin-top: 8px; padding-top: 7px; }
+
+/* small multiples */
+.multiples { display: grid; grid-template-columns: repeat(auto-fit, minmax(248px, 1fr)); gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: var(--r); overflow: hidden; }
+.mult { background: var(--surface); padding: 18px; }
+.mult-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 3px; }
+.mult-head i { width: 10px; height: 10px; border-radius: 2px; flex: none; align-self: center; }
+.mult-head h3 { font-family: var(--font-body); font-size: 13px; font-weight: 600; margin: 0; letter-spacing: -.005em; }
+.mult-head span { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3); margin-left: auto; }
+.mult-sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-3); margin: 0 0 12px; font-variant-numeric: tabular-nums; }
+.mult-sub b { color: var(--ink-2); font-weight: 500; }
+
+/* biggest events */
+.events { display: flex; flex-direction: column; }
+.ev {
+  display: grid; grid-template-columns: 62px 1fr auto; gap: 14px; align-items: center;
+  padding: 12px 4px; border-bottom: 1px solid var(--hairline);
+}
+.ev:last-child { border-bottom: 0; }
+.ev-mag { font-family: var(--font-mono); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ev-place { font-size: 13.5px; line-height: 1.35; }
+.ev-place small { display: block; color: var(--ink-3); font-family: var(--font-mono); font-size: 10.5px; margin-top: 2px; }
+.ev-tags { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.tag {
+  font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .07em;
+  text-transform: uppercase; padding: 3px 6px; border-radius: 2px;
+  border: 1px solid currentColor; white-space: nowrap;
+}
+/* the anchor IS the row, so this must be a.ev — `.ev a` matches nothing and
+   leaves every cell wearing the browser's default underline */
+a.ev { color: inherit; text-decoration: none; }
+a.ev:hover { background: var(--surface-2); }
+a.ev:hover .ev-place > span { text-decoration: underline; text-underline-offset: 3px; }
+
+/* table view */
+.tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; min-width: 640px; }
+th, td { text-align: right; padding: 9px 12px; border-bottom: 1px solid var(--hairline); font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+th { font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; position: sticky; top: 0; background: var(--surface); }
+th:first-child, td:first-child { text-align: left; }
+tbody tr:hover { background: var(--surface-2); }
+tr.partial td { color: var(--ink-3); font-style: italic; }
+.toggle-table {
+  background: none; border: 1px solid var(--hairline); border-radius: var(--r);
+  color: var(--ink-2); font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: .08em; text-transform: uppercase; padding: 8px 14px; cursor: pointer; min-height: 32px;
+}
+.toggle-table:hover { color: var(--ink); background: var(--surface-2); }
+
+/* notes / footer */
+.notes { margin-top: 62px; border-top: 1px solid var(--hairline); padding-top: 30px; }
+.notes h2 { font-size: 1.1rem; margin-bottom: 16px; }
+.notes details {
+  border-bottom: 1px solid var(--hairline); padding: 13px 0;
+}
+.notes summary {
+  cursor: pointer; font-size: 14px; font-weight: 500; color: var(--ink);
+  list-style: none; display: flex; align-items: center; gap: 10px;
+}
+.notes summary::-webkit-details-marker { display: none; }
+.notes summary::before {
+  content: "+"; font-family: var(--font-mono); color: var(--ink-3); font-size: 15px; flex: none; width: 12px;
+}
+.notes details[open] summary::before { content: "\2212"; }
+.notes details p { color: var(--ink-2); font-size: 13.5px; margin: 11px 0 3px 22px; max-width: 78ch; }
+.notes a { color: var(--mag-strong); }
+footer {
+  margin-top: 46px; padding-top: 24px; border-top: 1px solid var(--hairline);
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-3);
+  display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap;
+}
+footer a { color: var(--ink-2); }
+
+.err {
+  border: 1px solid rgba(208,59,59,.4); background: rgba(208,59,59,.09);
+  border-radius: var(--r); padding: 15px 18px; margin-top: 18px; font-size: 13.5px; color: var(--ink-2);
+}
+.err b { color: var(--st-critical); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+@media (max-width: 720px) {
+  .wrap { padding: 0 18px 72px; }
+  .verdict { padding: 24px 22px; }
+  .filters { position: static; }
+  .fmeta, .progress { text-align: left; margin-left: 0; }
+  #headerTrace { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <svg id="headerTrace" aria-hidden="true" preserveAspectRatio="none"><path d=""/></svg>
+  <p class="eyebrow"><span class="pulse"></span> Live from the USGS global catalog <span id="hdrUpdated"></span></p>
+  <h1>Is the Earth <em>really</em> shaking more?</h1>
+  <p class="standfirst">
+    It feels like there are more big earthquakes lately. This page checks that against the
+    actual record — every recorded quake of magnitude 4.5 and above, worldwide, straight from the
+    <strong>U.S. Geological Survey</strong>. No interpretation, no cherry-picked window.
+    Change the filters and the charts recalculate in front of you.
+  </p>
+</header>
+
+<!-- ── VERDICT ─────────────────────────────────────────────────────────── -->
+<div class="verdict" id="verdict">
+  <p class="verdict-label" id="verdictLabel">Reading the catalog…</p>
+  <p class="verdict-line" id="verdictLine">Loading global earthquake data</p>
+  <p class="verdict-body" id="verdictBody">Fetching year-by-year from the USGS. Charts appear as each year lands.</p>
+  <dl class="stat-row" id="statRow"></dl>
+</div>
+
+<!-- ── FILTERS ─────────────────────────────────────────────────────────── -->
+<div class="filters" role="group" aria-label="Filter the earthquake data">
+  <div class="fgroup">
+    <label id="lblBands">Magnitude class</label>
+    <div class="chips" id="bandChips" role="group" aria-labelledby="lblBands"></div>
+  </div>
+
+  <div class="fgroup">
+    <label for="selRange">Period</label>
+    <select id="selRange">
+      <option value="10" selected>Last 10 years</option>
+      <option value="20">Last 20 years</option>
+      <option value="36">Since 1990 — coverage caveat</option>
+    </select>
+  </div>
+
+  <div class="fgroup">
+    <label for="selDepth">Depth</label>
+    <select id="selDepth">
+      <option value="all" selected>Any depth</option>
+      <option value="shallow">Shallow &lt; 70 km (most damaging)</option>
+      <option value="inter">Intermediate 70–300 km</option>
+      <option value="deep">Deep &gt; 300 km</option>
+    </select>
+  </div>
+
+  <div class="fgroup">
+    <label for="selImpact">Impact</label>
+    <select id="selImpact">
+      <option value="all" selected>All earthquakes</option>
+      <option value="felt">Felt by people (reports filed)</option>
+      <option value="tsunami">Tsunami flag raised</option>
+      <option value="alert2">Alert: yellow or worse</option>
+      <option value="alert3">Alert: orange or red (major damage)</option>
+      <option value="sig600">High significance (600+)</option>
+      <option value="sig1000">Very high significance (1000+)</option>
+    </select>
+  </div>
+
+  <div class="fgroup">
+    <label for="selCompare">Compare</label>
+    <select id="selCompare">
+      <option value="ytd" selected>Same window each year (fair)</option>
+      <option value="full">Whole calendar years</option>
+    </select>
+  </div>
+
+  <div class="fgroup">
+    <label for="inpPlace">Region</label>
+    <input type="search" id="inpPlace" placeholder="e.g. Japan, Chile" autocomplete="off">
+  </div>
+
+  <div class="fspacer"></div>
+  <div>
+    <p class="fmeta" id="fmeta">—</p>
+    <div class="progress" id="progress"><i></i></div>
+  </div>
+</div>
+
+<div id="errBox"></div>
+<div id="noteBox"></div>
+
+<!-- ── 01 YEARLY ───────────────────────────────────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <span class="sec-num">01 — Year by year</span>
+    <h2>Every year, side by side</h2>
+    <p>Each bar is one year, split by how strong the quakes were. The dashed line is the
+       average across the completed years shown. If earthquakes were genuinely increasing,
+       the bars would climb from left to right. Watch whether they do.</p>
+  </div>
+  <div class="card">
+    <div class="legend" id="legendYear"></div>
+    <div class="chart" id="chartYear"><div class="tooltip" id="ttYear"></div></div>
+  </div>
+</section>
+
+<!-- ── 02 MONTHLY ──────────────────────────────────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <span class="sec-num">02 — Month by month</span>
+    <h2>The month-to-month picture</h2>
+    <p>The faint line is the raw monthly count — spiky, because one big quake sets off
+       hundreds of aftershocks in the weeks after it. The bright line is the rolling
+       12-month average, which cancels that noise out. <strong>That bright line is the
+       trend.</strong> A rising Earth would show a rising bright line.</p>
+  </div>
+  <div class="card">
+    <div class="legend" id="legendMonth"></div>
+    <div class="chart" id="chartMonth"><div class="tooltip" id="ttMonth"></div></div>
+  </div>
+</section>
+
+<!-- ── 03 SMALL MULTIPLES ──────────────────────────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <span class="sec-num">03 — Broken out by strength</span>
+    <h2>Each magnitude class on its own scale</h2>
+    <p>Small quakes outnumber large ones roughly ten to one per step of magnitude, so on a
+       shared axis the big ones vanish. Here each class gets its own scale, so a real rise
+       in major quakes can't hide behind the volume of small ones. Each panel shows the
+       rolling 12-month average.</p>
+  </div>
+  <div class="multiples" id="multiples"></div>
+</section>
+
+<!-- ── 04 BIGGEST ──────────────────────────────────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <span class="sec-num">04 — The ones you heard about</span>
+    <h2>Largest events in the current selection</h2>
+    <p>These are the quakes that make the news. Tags come from the USGS PAGER system, which
+       estimates likely damage and casualties. Click any row for the official event page.</p>
+  </div>
+  <div class="card"><div class="events" id="events"></div></div>
+</section>
+
+<!-- ── 05 TABLE ────────────────────────────────────────────────────────── -->
+<section>
+  <div class="sec-head">
+    <span class="sec-num">05 — The raw numbers</span>
+    <h2>Read it as a table</h2>
+    <p>Every figure behind the charts, so nothing is locked inside a tooltip.</p>
+  </div>
+  <button class="toggle-table" id="toggleTable" aria-expanded="false" aria-controls="tableCard">Show data table</button>
+  <div class="card" id="tableCard" style="display:none; margin-top:16px;">
+    <div class="tablewrap"><table id="dataTable"></table></div>
+  </div>
+</section>
+
+<!-- ── NOTES ───────────────────────────────────────────────────────────── -->
+<div class="notes">
+  <h2>How to read this honestly</h2>
+
+  <details open>
+    <summary>Why the current year is compared on a "same window" basis</summary>
+    <p>The year in progress is not finished, so comparing its running total against
+       completed years would always make it look low. By default this page compares
+       1 January → today against <em>exactly that same calendar window</em> in every
+       earlier year. Switch "Compare" to whole calendar years if you'd rather see full
+       totals, and the unfinished year is marked as partial.</p>
+  </details>
+
+  <details>
+    <summary>Why counts before ~2005 are not comparable to today</summary>
+    <p>The global seismic network has grown enormously. More stations mean more quakes
+       detected — especially moderate ones in remote ocean regions that simply went
+       unrecorded decades ago. So an upward slope over a multi-decade window can be
+       measuring <em>instrument coverage</em>, not seismicity. This is why the page
+       defaults to the last 10 years, where the network is broadly stable. If you widen
+       the period, treat the early years as undercounts.</p>
+  </details>
+
+  <details>
+    <summary>Why single years spike — aftershocks, not a restless planet</summary>
+    <p>One magnitude 8 earthquake generates hundreds of aftershocks above magnitude 4.5
+       over the following months. A single great quake can therefore lift an entire
+       year's count on its own. That's why a spike in the raw monthly line usually traces
+       back to one event, and why the rolling 12-month average is the more honest read of
+       whether anything is actually changing.</p>
+  </details>
+
+  <details>
+    <summary>What the impact filters actually cover</summary>
+    <p>Significance (<code>sig</code>) and the tsunami flag are set for every event.
+       The PAGER alert level and shaking intensity are only computed for events USGS
+       considers significant — verified coverage is about 9% of magnitude 4.5+ events but
+       <strong>100% of magnitude 6+</strong>, which is where damage actually happens.
+       "Felt" counts come from public Did You Feel It? reports, so they reflect where
+       people live and have internet as much as where the ground shook. An absence of red
+       alerts at low magnitudes means "not assessed", not "no damage".</p>
+  </details>
+
+  <details>
+    <summary>Where every number here comes from</summary>
+    <p>All figures are fetched live in your browser from the
+       <a href="https://earthquake.usgs.gov/fdsnws/event/1/" target="_blank" rel="noopener">USGS FDSN event API</a>,
+       the public interface to the ANSS Comprehensive Catalog — the same catalog
+       seismologists cite. Nothing is precomputed or stored on a server. Events flagged
+       by USGS as quarry blasts, explosions or other non-earthquake sources are excluded.
+       For the definitive reviewed record, the
+       <a href="https://www.isc.ac.uk/" target="_blank" rel="noopener">International Seismological Centre</a>
+       catalogue is the reference, though it runs roughly two years behind because it is
+       human-reviewed.</p>
+  </details>
+</div>
+
+<footer>
+  <span>Data: U.S. Geological Survey · ANSS Comprehensive Catalog · fetched live, in your browser</span>
+  <span><a href="https://earthquake.usgs.gov/earthquakes/search/" target="_blank" rel="noopener">Query it yourself →</a></span>
+</footer>
+
+</div>
+
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════════
+   1. CONFIG
+   ══════════════════════════════════════════════════════════════════════════ */
+const API   = "https://earthquake.usgs.gov/fdsnws/event/1/query";
+const NOW   = new Date();
+const THIS_YEAR = NOW.getUTCFullYear();
+
+/* Magnitude classes use the USGS naming, not invented low/medium/high.
+   Order is ordinal (weakest -> strongest) and drives the validated blue ramp. */
+const BANDS = [
+  { key:"light",    label:"Light",    range:"M4.5–4.9", min:4.5, max:5,        color:"var(--mag-light)",    hex:"#1c5cab", optional:true  },
+  { key:"moderate", label:"Moderate", range:"M5.0–5.9", min:5,   max:6,        color:"var(--mag-moderate)", hex:"#3987e5", optional:false },
+  { key:"strong",   label:"Strong",   range:"M6.0–6.9", min:6,   max:7,        color:"var(--mag-strong)",   hex:"#86b6ef", optional:false },
+  { key:"major",    label:"Major",    range:"M7.0+",    min:7,   max:Infinity, color:"var(--mag-major)",    hex:"#cde2fb", optional:false },
+];
+const ALERTS = [
+  null,
+  { key:"green",  label:"Green",  hex:"#0ca30c", glyph:"●" },
+  { key:"yellow", label:"Yellow", hex:"#fab219", glyph:"▲" },
+  { key:"orange", label:"Orange", hex:"#ec835a", glyph:"◆" },
+  { key:"red",    label:"Red",    hex:"#d03b3b", glyph:"✖" },
+];
+const ALERT_CODE = { green:1, yellow:2, orange:3, red:4 };
+
+/* Event tuple layout — kept compact because we hold ~85k of them in memory.
+   [ time_ms, mag, depth_km, sig, alertCode, tsunami, felt, place, id ] */
+const T=0, MAG=1, DEP=2, SIG=3, ALR=4, TSU=5, FLT=6, PLC=7, ID=8;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   2. STATE
+   ══════════════════════════════════════════════════════════════════════════ */
+const state = {
+  events: [],                        // all loaded events, any magnitude
+  loaded: { core:new Set(), light:new Set() },  // year keys already fetched
+  inflight: 0,
+  failed: [],
+  filters: {
+    bands: new Set(["moderate","strong","major"]),  // Light is opt-in (extra payload)
+    years: 10, depth:"all", impact:"all", compare:"ytd", place:"",
+  },
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   3. TINY INDEXEDDB CACHE
+   Past years never change, so caching makes repeat visits instant. Every call
+   degrades to a no-op if IDB is unavailable (private mode, old browser).
+   ══════════════════════════════════════════════════════════════════════════ */
+const DB = (() => {
+  let p = null;
+  function open() {
+    if (p) return p;
+    p = new Promise(res => {
+      let rq;
+      try { rq = indexedDB.open("quake-cache", 2); }
+      catch (e) { return res(null); }
+      rq.onupgradeneeded = () => {
+        const db = rq.result;
+        if (!db.objectStoreNames.contains("chunks")) db.createObjectStore("chunks");
+      };
+      rq.onsuccess = () => res(rq.result);
+      rq.onerror   = () => res(null);
+      setTimeout(() => res(null), 2500);          // never let a hung IDB block the UI
+    });
+    return p;
+  }
+  const tx = async (mode, fn) => {
+    const db = await open(); if (!db) return null;
+    try {
+      return await new Promise((res, rej) => {
+        const t = db.transaction("chunks", mode);
+        const r = fn(t.objectStore("chunks"));
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      });
+    } catch (e) { return null; }
+  };
+  return {
+    get: k => tx("readonly",  s => s.get(k)),
+    put: (k, v) => tx("readwrite", s => s.put(v, k)),
+  };
+})();
+
+/* ══════════════════════════════════════════════════════════════════════════
+   4. FETCH
+   One request per (year, magnitude slice). Year-chunking keeps every response
+   well under the API's 20,000-event ceiling and lets charts render
+   progressively instead of after one huge wait.
+   ══════════════════════════════════════════════════════════════════════════ */
+function chunkKey(year, slice) { return `v2:${slice}:${year}`; }
+
+async function fetchChunk(year, slice) {
+  const key = chunkKey(year, slice);
+  const cached = await DB.get(key);
+  if (cached) return cached;
+
+  const u = new URL(API);
+  u.searchParams.set("format", "geojson");
+  u.searchParams.set("starttime", `${year}-01-01T00:00:00`);
+  u.searchParams.set("endtime",   `${year + 1}-01-01T00:00:00`);
+  u.searchParams.set("orderby",   "time-asc");
+  if (slice === "light") {
+    u.searchParams.set("minmagnitude", "4.5");
+    u.searchParams.set("maxmagnitude", "4.99");
+  } else {
+    u.searchParams.set("minmagnitude", "5");
+  }
+
+  let json = null, lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch(u, { headers: { Accept: "application/json" } });
+      if (r.status === 429 || r.status === 503) throw new Error("busy");
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      json = await r.json();
+      break;
+    } catch (e) {
+      lastErr = e;
+      await new Promise(r => setTimeout(r, 700 * Math.pow(2, attempt)));
+    }
+  }
+  if (!json) throw lastErr || new Error("fetch failed");
+
+  const out = [];
+  for (const f of json.features) {
+    const p = f.properties;
+    // Exclude quarry blasts, explosions, nuclear tests — not earthquakes.
+    if (p.type !== "earthquake") continue;
+    if (p.mag == null || p.time == null) continue;
+    out.push([
+      p.time, +p.mag,
+      f.geometry && f.geometry.coordinates ? +f.geometry.coordinates[2] : 0,
+      p.sig || 0, ALERT_CODE[p.alert] || 0, p.tsunami ? 1 : 0, p.felt || 0,
+      p.place || "", f.id || "",
+    ]);
+  }
+  DB.put(key, out);
+  return out;
+}
+
+/* Concurrency-limited queue — 3 at a time is polite to a public API and still
+   fast enough that the first year lands in about a second. */
+async function runQueue(tasks, limit = 3) {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
+    while (i < tasks.length) await tasks[i++]();
+  });
+  await Promise.all(workers);
+}
+
+function yearsWanted() {
+  const span = state.filters.years;
+  const start = span >= 36 ? 1990 : THIS_YEAR - span;
+  return Array.from({ length: THIS_YEAR - start + 1 }, (_, i) => THIS_YEAR - i); // newest first
+}
+
+async function ensureLoaded() {
+  const wantLight = state.filters.bands.has("light");
+  const slices = wantLight ? ["core", "light"] : ["core"];
+  const tasks = [];
+
+  for (const slice of slices)
+    for (const y of yearsWanted())
+      if (!state.loaded[slice].has(y)) {
+        state.loaded[slice].add(y);
+        tasks.push(async () => {
+          state.inflight++;
+          updateProgress();
+          try {
+            const rows = await fetchChunk(y, slice);
+            state.events.push(...rows);
+            render();
+          } catch (e) {
+            state.loaded[slice].delete(y);
+            if (!state.failed.includes(y)) state.failed.push(y);
+            showError();
+          } finally {
+            state.inflight--; taskDone++; updateProgress();
+          }
+        });
+      }
+
+  if (!tasks.length) { render(); return; }
+  taskTotal += tasks.length;
+  updateProgress();
+  await runQueue(tasks);
+  updateProgress();
+  render();
+}
+
+/* Counted on completion, not on dispatch — `loaded` is marked optimistically at
+   queue time so it cannot double as a progress signal. */
+let taskTotal = 0, taskDone = 0;
+
+/* No live byte counter: USGS sends no Timing-Allow-Origin header, so
+   PerformanceResourceTiming.transferSize is always 0 cross-origin, and the
+   decoded JSON length would overstate the real gzipped transfer ~6x. The only
+   honest figure is the measured per-year estimate on the opt-in chip. */
+function updateProgress() {
+  const bar = document.getElementById("progress");
+  const busy = state.inflight > 0 || taskDone < taskTotal;
+  const pct = taskTotal ? Math.round(100 * taskDone / taskTotal) : 100;
+  bar.querySelector("i").style.width = pct + "%";
+  bar.classList.toggle("done", !busy);
+  const span = `${startYear()}–${THIS_YEAR}`;
+  document.getElementById("fmeta").textContent = busy
+    ? `Loading ${taskDone} of ${taskTotal} years…`
+    : `${fmt(state.events.length)} events loaded · ${span}`;
+}
+function showError() {
+  const box = document.getElementById("errBox");
+  if (!state.failed.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="err"><b>Some years could not be loaded</b> (${state.failed.join(", ")}).
+    The USGS API may be rate-limiting or briefly unavailable — the charts below show everything that did load.
+    <button class="toggle-table" id="retryBtn" style="margin-left:10px">Retry</button></div>`;
+  document.getElementById("retryBtn").addEventListener("click", () => {
+    state.failed = []; showError(); ensureLoaded();
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   5. FILTER + AGGREGATE
+   ══════════════════════════════════════════════════════════════════════════ */
+function bandOf(m) {
+  for (const b of BANDS) if (m >= b.min && m < b.max) return b.key;
+  return null;
+}
+function startYear() {
+  const span = state.filters.years;
+  return span >= 36 ? 1990 : THIS_YEAR - span;
+}
+
+/* The "fair window": 1 Jan -> today's month/day, applied to every year alike. */
+function inYtdWindow(d) {
+  const m = d.getUTCMonth(), day = d.getUTCDate();
+  const cm = NOW.getUTCMonth(), cd = NOW.getUTCDate();
+  return m < cm || (m === cm && day <= cd);
+}
+
+/* useYtd is passed explicitly: the "same window" rule belongs to the year-on-year
+   comparison only. Applying it to the monthly series would zero out every
+   September-to-December and invent a collapse that isn't in the data. */
+function applyFilters(useYtd) {
+  const f = state.filters, y0 = startYear();
+  const place = f.place.trim().toLowerCase();
+  const ytd = !!useYtd;
+  const out = [];
+  for (const e of state.events) {
+    const b = bandOf(e[MAG]);
+    if (!b || !f.bands.has(b)) continue;
+    const d = new Date(e[T]);
+    const yr = d.getUTCFullYear();
+    if (yr < y0 || yr > THIS_YEAR) continue;
+    if (ytd && !inYtdWindow(d)) continue;
+
+    if (f.depth === "shallow" && !(e[DEP] < 70)) continue;
+    if (f.depth === "inter"   && !(e[DEP] >= 70 && e[DEP] <= 300)) continue;
+    if (f.depth === "deep"    && !(e[DEP] > 300)) continue;
+
+    if (f.impact === "felt"    && !e[FLT]) continue;
+    if (f.impact === "tsunami" && !e[TSU]) continue;
+    if (f.impact === "alert2"  && e[ALR] < 2) continue;
+    if (f.impact === "alert3"  && e[ALR] < 3) continue;
+    if (f.impact === "sig600"  && e[SIG] < 600) continue;
+    if (f.impact === "sig1000" && e[SIG] < 1000) continue;
+
+    if (place && !e[PLC].toLowerCase().includes(place)) continue;
+    out.push(e);
+  }
+  return out;
+}
+
+const zeroBands = () => Object.fromEntries(BANDS.map(b => [b.key, 0]));
+const activeBands = () => BANDS.filter(b => state.filters.bands.has(b.key));
+
+/* Yearly totals — fed the YTD-windowed rows when "same window" is selected. */
+function aggregateYears(rows) {
+  const y0 = startYear();
+  const years = Array.from({ length: THIS_YEAR - y0 + 1 }, (_, i) => y0 + i);
+  const byYear = new Map(years.map(y => [y, { total:0, bands:zeroBands() }]));
+  for (const e of rows) {
+    const yv = byYear.get(new Date(e[T]).getUTCFullYear());
+    if (yv) { yv.total++; yv.bands[bandOf(e[MAG])]++; }
+  }
+  return { years, byYear, activeBands: activeBands() };
+}
+
+/* Monthly series — always fed the FULL rows, never the YTD window. */
+function aggregateMonths(rows) {
+  const y0 = startYear();
+  const monthMap = new Map();
+  for (const e of rows) {
+    const d = new Date(e[T]);
+    const mk = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    let mv = monthMap.get(mk);
+    if (!mv) { mv = { total:0, bands:zeroBands() }; monthMap.set(mk, mv); }
+    mv.total++; mv.bands[bandOf(e[MAG])]++;
+  }
+  // Dense series — a month with no quakes must read as zero, not as a gap.
+  const months = [];
+  for (let y = y0; y <= THIS_YEAR; y++) {
+    for (let m = 0; m < 12; m++) {
+      if (y === THIS_YEAR && m > NOW.getUTCMonth()) break;
+      const k = `${y}-${String(m + 1).padStart(2, "0")}`;
+      months.push({ key:k, year:y, month:m, ...(monthMap.get(k) || { total:0, bands:zeroBands() }) });
+    }
+  }
+  // Trailing 12-month mean — cancels aftershock spikes, exposes the trend.
+  const roll = months.map((_, i) => {
+    if (i < 11) return null;
+    let s = 0; for (let j = i - 11; j <= i; j++) s += months[j].total;
+    return s / 12;
+  });
+  return { months, roll, years: Array.from({ length: THIS_YEAR - y0 + 1 }, (_, i) => y0 + i),
+           activeBands: activeBands() };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   6. VERDICT
+   Compared against the mean and standard deviation of the completed years in
+   view, so "normal" is a measured band and not a number picked by hand.
+   ══════════════════════════════════════════════════════════════════════════ */
+function computeVerdict(agg) {
+  /* In "whole calendar years" mode the year in progress is only part-finished,
+     so judging it against complete years would always return "unusually low".
+     Judge the last COMPLETE year instead, and say which year is being judged. */
+  const full = state.filters.compare === "full";
+  const subject = full ? THIS_YEAR - 1 : THIS_YEAR;
+
+  const complete = agg.years.filter(y => y < subject);
+  const vals = complete.map(y => agg.byYear.get(y).total).filter(v => v > 0);
+  const cur = agg.byYear.get(subject) ? agg.byYear.get(subject).total : 0;
+  if (vals.length < 3 || !cur) return null;
+
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length) || 1;
+  const z = (cur - mean) / sd;
+  const pct = Math.round(100 * (cur - mean) / mean);
+
+  let word, color, gist;
+  if (z >= 2)       { word = "Unusually high";  color = "var(--st-critical)"; gist = "genuinely above the recent range"; }
+  else if (z >= 1)  { word = "Above average";   color = "var(--st-warning)";  gist = "on the high side, but inside the normal spread"; }
+  else if (z <= -2) { word = "Unusually low";   color = "var(--mag-strong)";  gist = "genuinely below the recent range"; }
+  else if (z <= -1) { word = "Below average";   color = "var(--mag-strong)";  gist = "on the low side, but inside the normal spread"; }
+  else              { word = "Normal";          color = "var(--st-good)";     gist = "squarely inside the normal year-to-year spread"; }
+
+  /* A z-score over a handful of events per year is noise. Say so rather than
+     dressing a 3-vs-5 difference up as a verdict. */
+  const thin = mean < 10;
+  if (thin) { word = "Too few to call"; color = "var(--ink-2)"; }
+
+  return { cur, mean, sd, z, pct, word, color, gist, thin, subject, full,
+           n: vals.length, vals, complete };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   7. RENDER — layout helpers
+   ══════════════════════════════════════════════════════════════════════════ */
+const fmt  = n => n.toLocaleString("en-US");
+const fmt1 = n => n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const svgEl = (n, a = {}) => {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", n);
+  for (const k in a) el.setAttribute(k, a[k]);
+  return el;
+};
+function niceTicks(max, count = 5) {
+  if (max <= 0) return { ticks:[0], top:1 };
+  const raw = max / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw) || 10 * mag;
+  const top = Math.ceil(max / step) * step;
+  const ticks = []; for (let v = 0; v <= top + 1e-9; v += step) ticks.push(v);
+  return { ticks, top };
+}
+function widthOf(el) { return Math.max(320, el.clientWidth || 700); }
+
+/* ── 7a. Yearly stacked bars ─────────────────────────────────────────────── */
+function renderYearChart(agg, verdict) {
+  const host = document.getElementById("chartYear");
+  const tip  = document.getElementById("ttYear");
+  host.querySelectorAll("svg").forEach(n => n.remove());
+
+  const W = widthOf(host), H = 340;
+  const M = { t: 18, r: 16, b: 42, l: 52 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const svg = svgEl("svg", { viewBox:`0 0 ${W} ${H}`, role:"img",
+    "aria-label":"Earthquakes per year, stacked by magnitude class" });
+
+  const ys = agg.years;
+  const max = Math.max(1, ...ys.map(y => agg.byYear.get(y).total));
+  const { ticks, top } = niceTicks(max);
+  const yScale = v => M.t + ih - (v / top) * ih;
+  const bw = Math.min(46, iw / ys.length * 0.68);
+  const xAt = i => M.l + (i + 0.5) * (iw / ys.length);
+
+  ticks.forEach(t => {
+    svg.appendChild(svgEl("line", { class:"gridline", x1:M.l, x2:M.l+iw, y1:yScale(t), y2:yScale(t) }));
+    const lb = svgEl("text", { class:"tick", x:M.l-9, y:yScale(t)+3.5, "text-anchor":"end" });
+    lb.textContent = fmt(t); svg.appendChild(lb);
+  });
+
+  const partialYear = state.filters.compare === "full" ? THIS_YEAR : -1;
+
+  ys.forEach((y, i) => {
+    const d = agg.byYear.get(y);
+    const g = svgEl("g", { class:"bar-group" });
+    let acc = 0;
+    agg.activeBands.forEach(b => {
+      const v = d.bands[b.key]; if (!v) return;
+      const y1 = yScale(acc + v), y0 = yScale(acc);
+      const h = Math.max(0, y0 - y1 - 2);           // 2px surface gap between segments
+      const r = svgEl("rect", { class:"bar on", x:xAt(i)-bw/2, y:y1, width:bw,
+        height:h, fill:b.hex, rx:1.5 });
+      if (y === partialYear) r.setAttribute("opacity", ".5");
+      g.appendChild(r); acc += v;
+    });
+    // generous hit area, not the bar itself
+    const hit = svgEl("rect", { class:"hitrect", x:xAt(i)-(iw/ys.length)/2, y:M.t,
+      width:iw/ys.length, height:ih });
+    hit.addEventListener("pointerenter", ev => {
+      let html = `<div class="tt-title">${y}${y===partialYear?" · partial":""}</div>`;
+      agg.activeBands.slice().reverse().forEach(b => {
+        html += `<div class="tt-row"><i style="background:${b.hex}"></i>${b.label} <span style="color:var(--ink-3)">${b.range}</span><b>${fmt(d.bands[b.key])}</b></div>`;
+      });
+      html += `<div class="tt-row tt-total"><span>Total</span><b>${fmt(d.total)}</b></div>`;
+      tip.innerHTML = html; tip.classList.add("on");
+      const bb = host.getBoundingClientRect();
+      tip.style.left = (ev.clientX - bb.left) + "px";
+      tip.style.top  = (yScale(d.total) - 12) + "px";
+    });
+    hit.addEventListener("pointerleave", () => tip.classList.remove("on"));
+    g.appendChild(hit);
+    svg.appendChild(g);
+
+    if (ys.length <= 22 || i % 2 === 0) {
+      const lb = svgEl("text", { class:"tick", x:xAt(i), y:H-M.b+18, "text-anchor":"middle" });
+      lb.textContent = ys.length > 14 ? String(y).slice(2) : y;
+      svg.appendChild(lb);
+    }
+  });
+
+  // average across completed years — dashed because it IS a reference line
+  if (verdict) {
+    const ay = yScale(verdict.mean);
+    svg.appendChild(svgEl("line", { class:"avgline", x1:M.l, x2:M.l+iw, y1:ay, y2:ay }));
+    // left-anchored: the right edge is where the most recent (tallest) bars sit
+    const lab = svgEl("text", { class:"dlabel", x:M.l+6, y:ay-9, "text-anchor":"start" });
+    lab.textContent = `${verdict.n}-year average  ${fmt(Math.round(verdict.mean))}`;
+    svg.appendChild(lab);
+  }
+
+  svg.appendChild(svgEl("line", { class:"axisline", x1:M.l, x2:M.l+iw, y1:M.t+ih, y2:M.t+ih }));
+  const at = svgEl("text", { class:"axis-title", x:M.l, y:12 });
+  at.textContent = state.filters.compare === "ytd"
+    ? `Earthquakes · 1 Jan – ${NOW.getUTCDate()} ${MONTH_ABBR[NOW.getUTCMonth()]} each year`
+    : "Earthquakes per calendar year";
+  svg.appendChild(at);
+  host.appendChild(svg);
+
+  document.getElementById("legendYear").innerHTML =
+    agg.activeBands.slice().reverse().map(b =>
+      `<span><i style="background:${b.hex}"></i>${b.label} <span style="color:var(--ink-3)">${b.range}</span></span>`).join("")
+    + `<span><i class="dash" style="border-color:var(--accent)"></i>Average of completed years</span>`;
+}
+
+/* ── 7b. Monthly line + rolling average ──────────────────────────────────── */
+function renderMonthChart(agg) {
+  const host = document.getElementById("chartMonth");
+  const tip  = document.getElementById("ttMonth");
+  host.querySelectorAll("svg").forEach(n => n.remove());
+
+  const ms = agg.months;
+  if (!ms.length) return;
+  const W = widthOf(host), H = 350;
+  const M = { t: 18, r: 16, b: 42, l: 52 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const svg = svgEl("svg", { viewBox:`0 0 ${W} ${H}`, role:"img",
+    "aria-label":"Monthly earthquake counts with a rolling 12-month average" });
+
+  const max = Math.max(1, ...ms.map(m => m.total));
+  const { ticks, top } = niceTicks(max);
+  const xAt = i => M.l + (ms.length === 1 ? iw/2 : (i / (ms.length - 1)) * iw);
+  const yAt = v => M.t + ih - (v / top) * ih;
+
+  ticks.forEach(t => {
+    svg.appendChild(svgEl("line", { class:"gridline", x1:M.l, x2:M.l+iw, y1:yAt(t), y2:yAt(t) }));
+    const lb = svgEl("text", { class:"tick", x:M.l-9, y:yAt(t)+3.5, "text-anchor":"end" });
+    lb.textContent = fmt(t); svg.appendChild(lb);
+  });
+
+  // year boundaries + labels
+  ms.forEach((m, i) => {
+    if (m.month !== 0) return;
+    svg.appendChild(svgEl("line", { class:"gridline", x1:xAt(i), x2:xAt(i), y1:M.t, y2:M.t+ih }));
+    const span = agg.years.length;
+    if (span <= 12 || m.year % (span > 24 ? 5 : 2) === 0) {
+      const lb = svgEl("text", { class:"tick", x:xAt(i), y:H-M.b+18, "text-anchor":"middle" });
+      lb.textContent = span > 12 ? String(m.year).slice(2) : m.year;
+      svg.appendChild(lb);
+    }
+  });
+
+  const raw = ms.map((m, i) => `${i ? "L" : "M"}${xAt(i).toFixed(1)},${yAt(m.total).toFixed(1)}`).join("");
+  svg.appendChild(svgEl("path", { d:raw, fill:"none", stroke:"var(--mag-light)",
+    "stroke-width":1.25, "stroke-linejoin":"round", opacity:".85" }));
+
+  let started = false, rp = "";
+  agg.roll.forEach((v, i) => { if (v == null) return;
+    rp += `${started ? "L" : "M"}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`; started = true; });
+  if (rp) svg.appendChild(svgEl("path", { d:rp, fill:"none", stroke:"var(--mag-major)",
+    "stroke-width":2.25, "stroke-linejoin":"round", "stroke-linecap":"round" }));
+
+  // direct-label the endpoint only — never a number on every point
+  const lastRoll = [...agg.roll].reverse().find(v => v != null);
+  if (lastRoll != null) {
+    const li = agg.roll.lastIndexOf(lastRoll);
+    svg.appendChild(svgEl("circle", { cx:xAt(li), cy:yAt(lastRoll), r:3.5,
+      fill:"var(--mag-major)", stroke:"var(--surface)", "stroke-width":2 }));
+    const lb = svgEl("text", { class:"dlabel", x:xAt(li)-8, y:yAt(lastRoll)-11, "text-anchor":"end" });
+    lb.textContent = `12-mo avg ${fmt(Math.round(lastRoll))}/mo`;
+    svg.appendChild(lb);
+  }
+
+  // crosshair layer
+  const cross = svgEl("line", { class:"crosshair", y1:M.t, y2:M.t+ih, opacity:0 });
+  svg.appendChild(cross);
+  const hit = svgEl("rect", { class:"hitrect", x:M.l, y:M.t, width:iw, height:ih });
+  hit.addEventListener("pointermove", ev => {
+    const bb = svg.getBoundingClientRect();
+    const px = (ev.clientX - bb.left) * (W / bb.width);
+    const i = Math.max(0, Math.min(ms.length - 1, Math.round((px - M.l) / iw * (ms.length - 1))));
+    const m = ms[i];
+    cross.setAttribute("x1", xAt(i)); cross.setAttribute("x2", xAt(i)); cross.setAttribute("opacity", ".55");
+    let html = `<div class="tt-title">${MONTH_ABBR[m.month]} ${m.year}</div>`;
+    agg.activeBands.slice().reverse().forEach(b => {
+      if (!m.bands[b.key]) return;
+      html += `<div class="tt-row"><i style="background:${b.hex}"></i>${b.label}<b>${fmt(m.bands[b.key])}</b></div>`;
+    });
+    html += `<div class="tt-row tt-total"><span>This month</span><b>${fmt(m.total)}</b></div>`;
+    if (agg.roll[i] != null) html += `<div class="tt-row"><span style="color:var(--ink-3)">12-mo average</span><b>${fmt1(agg.roll[i])}</b></div>`;
+    tip.innerHTML = html; tip.classList.add("on");
+    const hb = host.getBoundingClientRect();
+    tip.style.left = Math.max(80, Math.min(hb.width - 80, ev.clientX - hb.left)) + "px";
+    tip.style.top  = (M.t + 10) + "px";
+  });
+  hit.addEventListener("pointerleave", () => { tip.classList.remove("on"); cross.setAttribute("opacity", 0); });
+  svg.appendChild(hit);
+
+  svg.appendChild(svgEl("line", { class:"axisline", x1:M.l, x2:M.l+iw, y1:M.t+ih, y2:M.t+ih }));
+  const at = svgEl("text", { class:"axis-title", x:M.l, y:12 });
+  at.textContent = "Earthquakes per month";
+  svg.appendChild(at);
+  host.appendChild(svg);
+
+  document.getElementById("legendMonth").innerHTML =
+    `<span><i class="line" style="border-color:var(--mag-light)"></i>Raw monthly count</span>
+     <span><i class="line" style="border-color:var(--mag-major)"></i>Rolling 12-month average — the trend</span>`;
+}
+
+/* ── 7c. Small multiples, one per class, each on its own scale ───────────── */
+function renderMultiples(agg) {
+  const host = document.getElementById("multiples");
+  host.innerHTML = "";
+
+  agg.activeBands.slice().reverse().forEach(b => {
+    const cell = document.createElement("div");
+    cell.className = "mult";
+
+    const series = agg.months.map(m => m.bands[b.key]);
+    const roll = series.map((_, i) => {
+      if (i < 11) return null;
+      let s = 0; for (let j = i - 11; j <= i; j++) s += series[j];
+      return s / 12;
+    });
+    const totalNow = series.reduce((a, c) => a + c, 0);
+
+    // first vs last complete rolling value = the honest "has it moved" number
+    const firstRoll = roll.find(v => v != null);
+    const lastRoll  = [...roll].reverse().find(v => v != null);
+    let drift = "not enough data";
+    if (firstRoll != null && lastRoll != null && firstRoll > 0) {
+      const dp = Math.round(100 * (lastRoll - firstRoll) / firstRoll);
+      drift = `<b>${dp > 0 ? "+" : ""}${dp}%</b> vs start of period`;
+    }
+
+    cell.innerHTML =
+      `<div class="mult-head"><i style="background:${b.hex}"></i>
+         <h3>${b.label}</h3><span>${b.range}</span></div>
+       <p class="mult-sub">${fmt(totalNow)} events · ${drift}</p>`;
+
+    const W = 320, H = 96, M = { t: 6, r: 4, b: 4, l: 4 };
+    const iw = W - M.l - M.r, ih = H - M.t - M.b;
+    const max = Math.max(1, ...series);
+    const xAt = i => M.l + (series.length <= 1 ? iw/2 : (i / (series.length - 1)) * iw);
+    const yAt = v => M.t + ih - (v / max) * ih;
+
+    const svg = svgEl("svg", { viewBox:`0 0 ${W} ${H}`, preserveAspectRatio:"none",
+      style:"height:96px", role:"img",
+      "aria-label":`${b.label} ${b.range}: ${fmt(totalNow)} events over the period` });
+
+    const area = series.map((v, i) => `${i ? "L" : "M"}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`).join("")
+      + `L${xAt(series.length-1).toFixed(1)},${M.t+ih}L${xAt(0).toFixed(1)},${M.t+ih}Z`;
+    svg.appendChild(svgEl("path", { d:area, fill:b.hex, opacity:".22" }));
+
+    let started = false, rp = "";
+    roll.forEach((v, i) => { if (v == null) return;
+      rp += `${started ? "L" : "M"}${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`; started = true; });
+    if (rp) svg.appendChild(svgEl("path", { d:rp, fill:"none", stroke:b.hex,
+      "stroke-width":2, "stroke-linecap":"round", "stroke-linejoin":"round",
+      "vector-effect":"non-scaling-stroke" }));
+
+    cell.appendChild(svg);
+    host.appendChild(cell);
+  });
+}
+
+/* ── 7d. Largest events ──────────────────────────────────────────────────── */
+function renderEvents(rows) {
+  const host = document.getElementById("events");
+  const top = rows.slice().sort((a, b) => b[MAG] - a[MAG] || b[T] - a[T]).slice(0, 12);
+  if (!top.length) { host.innerHTML = `<p style="color:var(--ink-3);margin:6px 0">No events match these filters.</p>`; return; }
+
+  host.innerHTML = top.map(e => {
+    const d = new Date(e[T]);
+    const b = BANDS.find(x => x.key === bandOf(e[MAG]));
+    const tags = [];
+    if (e[ALR]) { const a = ALERTS[e[ALR]];
+      tags.push(`<span class="tag" style="color:${a.hex}">${a.glyph} ${a.label} alert</span>`); }
+    if (e[TSU]) tags.push(`<span class="tag" style="color:var(--mag-strong)">Tsunami</span>`);
+    if (e[FLT]) tags.push(`<span class="tag" style="color:var(--ink-3)">${fmt(e[FLT])} felt reports</span>`);
+    const href = e[ID] ? `https://earthquake.usgs.gov/earthquakes/eventpage/${e[ID]}` : null;
+    const inner =
+      `<div class="ev-mag" style="color:${b ? b.hex : "var(--ink)"}">${e[MAG].toFixed(1)}</div>
+       <div class="ev-place"><span>${escapeHtml(e[PLC] || "Unknown location")}</span>
+         <small>${d.toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"})} · ${Math.round(e[DEP])} km deep</small></div>
+       <div class="ev-tags">${tags.join("")}</div>`;
+    return href ? `<a class="ev" href="${href}" target="_blank" rel="noopener">${inner}</a>`
+                : `<div class="ev">${inner}</div>`;
+  }).join("");
+}
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" })[c]); }
+
+/* ── 7e. Table view ──────────────────────────────────────────────────────── */
+function renderTable(agg) {
+  const t = document.getElementById("dataTable");
+  const bs = agg.activeBands;
+  const partial = state.filters.compare === "full" ? THIS_YEAR : -1;
+  t.innerHTML =
+    `<caption class="visually-hidden">Earthquake counts per year by magnitude class</caption>
+     <thead><tr><th scope="col">Year</th>${bs.map(b=>`<th scope="col">${b.label}<br>${b.range}</th>`).join("")}<th scope="col">Total</th></tr></thead>
+     <tbody>${agg.years.slice().reverse().map(y => {
+        const d = agg.byYear.get(y);
+        return `<tr class="${y===partial?"partial":""}"><th scope="row">${y}${y===partial?" *":""}</th>${
+          bs.map(b=>`<td>${fmt(d.bands[b.key])}</td>`).join("")}<td><strong>${fmt(d.total)}</strong></td></tr>`;
+     }).join("")}</tbody>`;
+}
+
+/* ── 7f. Verdict + stats ─────────────────────────────────────────────────── */
+function renderVerdict(agg, v) {
+  const box  = document.getElementById("verdict");
+  const line = document.getElementById("verdictLine");
+  const body = document.getElementById("verdictBody");
+  const lab  = document.getElementById("verdictLabel");
+  const stat = document.getElementById("statRow");
+
+  if (!v) {
+    lab.textContent = state.inflight ? "Reading the catalog…" : "Not enough data";
+    line.textContent = state.inflight ? "Loading global earthquake data" : "Widen the filters";
+    body.textContent = state.inflight
+      ? "Fetching year by year from the USGS. Charts appear as each year lands."
+      : "The current selection doesn't leave enough completed years to compare against.";
+    stat.innerHTML = ""; box.style.setProperty("--verdict-color", "var(--ink-3)");
+    return;
+  }
+
+  const windowLabel = v.full
+    ? "whole calendar years"
+    : `1 Jan – ${NOW.getUTCDate()} ${MONTH_ABBR[NOW.getUTCMonth()]}`;
+  const dir = v.pct === 0 ? "exactly at" : (v.pct > 0 ? `${v.pct}% above` : `${Math.abs(v.pct)}% below`);
+
+  box.style.setProperty("--verdict-color", v.color);
+  lab.textContent = `${v.subject}${v.full ? " · last complete year" : " so far"} · ${windowLabel} · ${describeSelection()}`;
+  line.textContent = v.thin ? "Too few events to call." : `${v.subject} ${v.full ? "was" : "is"} ${v.word.toLowerCase()}.`;
+
+  if (v.thin) {
+    body.innerHTML =
+      `This selection averages only <b>${fmt1(v.mean)}</b> earthquakes a year, and
+       ${v.subject} had <b>${fmt(v.cur)}</b>. At those numbers a single event moves the
+       result more than any trend does, so no meaningful verdict can be drawn — widen the
+       magnitude classes or relax the impact filter to get a comparison worth making.`;
+  } else {
+    body.innerHTML =
+      `There ${v.full ? "were" : "have been"} <b>${fmt(v.cur)}</b> matching earthquakes
+       ${v.full ? `in ${v.subject}` : "so far this year"}, against an average of
+       <b>${fmt(Math.round(v.mean))}</b> over ${v.full ? "the" : "the same window in the"}
+       previous ${v.n} years — ${dir} average, and ${v.gist}.
+       Year-to-year swings in this selection normally run about <b>±${fmt(Math.round(v.sd))}</b>,
+       so this gap of ${fmt(Math.abs(Math.round(v.cur - v.mean)))} is
+       <b>${Math.abs(v.z).toFixed(1)}×</b> the usual swing.` +
+      (v.full ? ` <b>${THIS_YEAR}</b> is still in progress and is shown as a partial bar below.` : "");
+  }
+
+  const lo = Math.min(...v.vals), hi = Math.max(...v.vals);
+  const loY = v.complete[v.vals.indexOf(lo)], hiY = v.complete[v.vals.indexOf(hi)];
+  stat.innerHTML = `
+    <div class="stat"><dt>${v.subject}${v.full ? "" : " so far"}</dt><dd>${fmt(v.cur)}</dd></div>
+    <div class="stat"><dt>${v.n}-year average</dt><dd>${fmt(Math.round(v.mean))}<small>${v.full ? "complete years" : "same window each year"}</small></dd></div>
+    <div class="stat"><dt>Normal range</dt><dd>${fmt(Math.round(v.mean-v.sd))}–${fmt(Math.round(v.mean+v.sd))}<small>±1 standard deviation</small></dd></div>
+    <div class="stat"><dt>Busiest year</dt><dd>${fmt(hi)}<small>${hiY}</small></dd></div>
+    <div class="stat"><dt>Quietest year</dt><dd>${fmt(lo)}<small>${loY}</small></dd></div>`;
+}
+function describeSelection() {
+  const bs = BANDS.filter(b => state.filters.bands.has(b.key));
+  if (!bs.length) return "no classes selected";
+  const lo = bs[0], hi = bs[bs.length - 1];
+  let s = bs.length === BANDS.length ? "M4.5+"
+        : (lo === hi ? lo.range : `M${lo.min.toFixed(1)}+${hi.max === Infinity ? "" : ` to ${hi.label}`}`);
+  const f = state.filters;
+  if (f.depth !== "all")  s += ` · ${document.getElementById("selDepth").selectedOptions[0].text.split(" (")[0]}`;
+  if (f.impact !== "all") s += ` · ${document.getElementById("selImpact").selectedOptions[0].text.split(" (")[0]}`;
+  if (f.place)            s += ` · “${f.place}”`;
+  return s;
+}
+
+/* ── 7g. Header trace: the real data, drawn as a seismogram ─────────────── */
+function renderHeaderTrace(agg) {
+  const svg = document.getElementById("headerTrace");
+  const path = svg.querySelector("path");
+  const ms = agg.months;
+  if (ms.length < 6) { path.setAttribute("d", ""); return; }
+  const W = 1000, H = 200;
+  const max = Math.max(1, ...ms.map(m => m.total));
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  path.setAttribute("d", ms.map((m, i) =>
+    `${i ? "L" : "M"}${(i / (ms.length - 1) * W).toFixed(1)},${(H - (m.total / max) * H * 0.8 - H * 0.1).toFixed(1)}`
+  ).join(""));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   8. MAIN RENDER
+   ══════════════════════════════════════════════════════════════════════════ */
+let raf = null;
+function render() {
+  if (raf) cancelAnimationFrame(raf);
+  raf = requestAnimationFrame(() => {
+    const rowsAll = applyFilters(false);
+    // Only the year-on-year comparison uses the "same window" slice.
+    const rowsYear = state.filters.compare === "ytd" ? applyFilters(true) : rowsAll;
+
+    const aggY = aggregateYears(rowsYear);
+    const aggM = aggregateMonths(rowsAll);
+    const v = computeVerdict(aggY);
+
+    renderVerdict(aggY, v);
+    renderYearChart(aggY, v);
+    renderMonthChart(aggM);
+    renderMultiples(aggM);
+    renderEvents(rowsAll);
+    renderTable(aggY);
+    renderHeaderTrace(aggM);
+    updateProgress();
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9. CONTROLS
+   ══════════════════════════════════════════════════════════════════════════ */
+function buildChips() {
+  const host = document.getElementById("bandChips");
+  host.innerHTML = "";
+  BANDS.slice().reverse().forEach(b => {
+    const on = state.filters.bands.has(b.key);
+    const btn = document.createElement("button");
+    btn.className = "chip"; btn.type = "button";
+    btn.setAttribute("aria-pressed", String(on));
+    // Measured: ~0.63 MB gzipped per year for the M4.5–4.9 slice.
+    const costMB = Math.round(yearsWanted().length * 0.63);
+    btn.innerHTML = `<span class="sw" style="background:${b.hex}"></span>${b.label}
+      <span style="color:var(--ink-3)">${b.range}</span>` +
+      (b.optional && !on ? ` <span class="cost">+${costMB} MB</span>` : "");
+    btn.addEventListener("click", () => {
+      const s = state.filters.bands;
+      if (s.has(b.key)) { if (s.size > 1) s.delete(b.key); } else s.add(b.key);
+      buildChips();
+      ensureLoaded();
+    });
+    host.appendChild(btn);
+  });
+}
+
+/* Widening the period past the modern network's stable era changes what the
+   numbers mean, so say so on screen rather than only in the notes. */
+function coverageNote() {
+  const box = document.getElementById("noteBox");
+  if (state.filters.years <= 10) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="err" style="border-color:rgba(250,178,25,.38);background:rgba(250,178,25,.08)">
+    <b style="color:var(--st-warning)">Coverage caveat</b> — you are now looking back far enough that the
+    global seismic network itself was smaller. Earlier years detected fewer earthquakes than the same
+    activity would register today, so any upward slope across this window partly measures
+    <em>instrument coverage</em>, not seismicity. The last 10 years are the safest like-for-like comparison.</div>`;
+}
+
+function bindControls() {
+  const on = (id, key, cast = v => v) =>
+    document.getElementById(id).addEventListener("change", e => {
+      state.filters[key] = cast(e.target.value);
+      if (key === "years") { buildChips(); coverageNote(); ensureLoaded(); } else render();
+    });
+  on("selRange", "years", Number);
+  on("selDepth", "depth");
+  on("selImpact", "impact");
+  on("selCompare", "compare");
+
+  let deb;
+  document.getElementById("inpPlace").addEventListener("input", e => {
+    clearTimeout(deb);
+    deb = setTimeout(() => { state.filters.place = e.target.value; render(); }, 220);
+  });
+
+  const tbtn = document.getElementById("toggleTable");
+  tbtn.addEventListener("click", () => {
+    const card = document.getElementById("tableCard");
+    const open = card.style.display !== "none";
+    card.style.display = open ? "none" : "block";
+    tbtn.setAttribute("aria-expanded", String(!open));
+    tbtn.textContent = open ? "Show data table" : "Hide data table";
+  });
+
+  let rt;
+  new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(render, 140); })
+    .observe(document.getElementById("chartYear"));
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   10. BOOT
+   ══════════════════════════════════════════════════════════════════════════ */
+document.getElementById("hdrUpdated").textContent =
+  "· read " + NOW.toLocaleDateString("en-GB", { day:"numeric", month:"short", year:"numeric" });
+buildChips();
+bindControls();
+ensureLoaded();
+</script>
+</body>
+</html>
